@@ -16,3 +16,6 @@
 [submodule "src/extensions/default/everyscrub"]
 	path = src/extensions/default/everyscrub
 	url = git://github.com/peterflynn/everyscrub.git
+[submodule "src/extensions/default/dropbox"]
+	path = src/extensions/default/dropbox
+	url = git@github.com:ccoenraets/brackets-dropbox.git

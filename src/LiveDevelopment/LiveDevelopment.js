@@ -116,14 +116,11 @@ define(function LiveDevelopment(require, exports, module) {
     var _liveDocument; // the document open for live editing.
     var _relatedDocuments; // CSS and JS documents that are used by the live HTML document
 
-    var _urlWrapper;
+    var _urlWrappers = [];
     var _closeScript;
     var _useDevTool;
-    function setUrlWrapper(wrapper) {
-        _urlWrapper = wrapper;
-    }
-    function getUrlWrapper(wrapper) {
-        return _urlWrapper;
+    function addUrlWrapper(wrapper) {
+        _urlWrappers.push(wrapper);
     }
     function setCloseScript(script) {
         _closeScript = script;
@@ -400,8 +397,8 @@ define(function LiveDevelopment(require, exports, module) {
         var message;
         
         // Sometimes error.message is undefined
-        if (!error.message) {
-            console.warn("Expected a non-empty string in error.message, got this instead:", error.message);
+        if (!error || !error.message) {
+            console.warn("Expected a non-empty string in error.message, got this instead:", error?error.message:null);
             message = JSON.stringify(error);
         } else {
             message = error.message;
@@ -413,7 +410,7 @@ define(function LiveDevelopment(require, exports, module) {
         }
 
         // Additional information, like exactly which parameter could not be processed.
-        var data = error.data;
+        var data = error?error.data:null;
         if (Array.isArray(data)) {
             message += "\n" + data.join("\n");
         }
@@ -490,10 +487,14 @@ define(function LiveDevelopment(require, exports, module) {
         var result = new $.Deferred(),
             promise = result.promise();
         var doc = _getCurrentDocument();
-        var argUrl = _urlWrapper ? _urlWrapper(doc.root.url) : doc.root.url;
-        var url = argUrl.split(" ");
+        var argUrl = doc.root.url;
+        var url;
         var browserStarted = false;
         var retryCount = 0;
+        _urlWrappers.forEach(function (wrapper) {
+            argUrl = wrapper(argUrl);
+        })
+        url = argUrl.split(" ");
         _useDevTool = useDevTool;
 
         url = url[url.length - 1].split('-app=');
@@ -675,7 +676,8 @@ define(function LiveDevelopment(require, exports, module) {
 
         if (Inspector.connected()) {
             hideHighlight();
-            if (agents.network && agents.network.wasURLRequested(_pathToUrl(doc.file.fullPath))) {
+            //if (agents.network && agents.network.wasURLRequested(_pathToUrl(doc.file.fullPath))) {
+            if (agents.network && agents.network.wasURLRequested(doc.url)) {
                 _closeDocument();
                 var editor = EditorManager.getCurrentFullEditor();
                 _openDocument(doc, editor);
@@ -697,6 +699,7 @@ define(function LiveDevelopment(require, exports, module) {
     function _onDocumentSaved(event, doc) {
         if (doc && Inspector.connected() && _classForDocument(doc) !== CSSDocument &&
                 agents.network && agents.network.wasURLRequested(doc.url)) {
+            $(exports).triggerHandler("liveHTMLSaved", doc);
             // Reload HTML page
             Inspector.Page.reload();
 
@@ -739,8 +742,7 @@ define(function LiveDevelopment(require, exports, module) {
     exports.showHighlight       = showHighlight;
     exports.hideHighlight       = hideHighlight;
     exports.redrawHighlight     = redrawHighlight;
-    exports.setUrlWrapper       = setUrlWrapper;
-    exports.getUrlWrapper       = getUrlWrapper;
+    exports.addUrlWrapper       = addUrlWrapper;
     exports.setCloseScript       = setCloseScript;
     exports.init                = init;
 });

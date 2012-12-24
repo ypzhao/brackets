@@ -1,5 +1,4 @@
-/*
- * The MIT License (MIT)
+/* * The MIT License (MIT)
  * Copyright (c) 2012 Dennis Kehrig. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -39,7 +38,8 @@ define(function main(require, exports, module) {
         Commands       = brackets.getModule("command/Commands"),
         FileUtils      = brackets.getModule("file/FileUtils"),
         LiveDevelopment = brackets.getModule("LiveDevelopment/LiveDevelopment"),
-        ProjectManager = brackets.getModule("project/ProjectManager"),
+        ProjectManager  = brackets.getModule("project/ProjectManager"),
+        DocumentManager = brackets.getModule("document/DocumentManager"),
         Inspector      = brackets.getModule("LiveDevelopment/Inspector/Inspector");
 
     // <style> tag containing CSS code compiled from LESS
@@ -48,7 +48,7 @@ define(function main(require, exports, module) {
     var _$button;
     /** Loads a less file as CSS into the document */
     var _$debugging = false;
-    var _simulatorUrlWraper;
+    var _deviceSelect;
 
     function _loadLessFile(file, dir) {
         var result = $.Deferred();
@@ -104,30 +104,43 @@ define(function main(require, exports, module) {
     function _loadSelect() {
         var result = new $.Deferred();
         _loadStyle().done(function () {
-            var _deviceSelect = $("<select id='devices'><option value='Simulator'>Simulator</option></select>")
+            _deviceSelect = $("<select id='devices'><option value='Simulator'>Simulator</option></select>")
                                     .change(function() {
                                         $("option:selected", this).each(function () {
+                                            var inspectorJson = "Inspector.json";
                                             window.device = $(this).val();
-                                            if (window.device === "Simulator" && _simulatorUrlWraper) {
-                                                LiveDevelopment.setUrlWrapper(_simulatorUrlWraper);
+                                            Inspector.setSocketsGetter(null);
+                                            if (window.device === "Simulator") {
                                                 ProjectManager.setBaseUrl("");
-                                                Inspector.setSocketsGetter(null);
-                                                Inspector.setInspectorJson("Inspector_new.json");
                                             }
                                             else {
-                                                _simulatorUrlWraper = LiveDevelopment.getUrlWrapper();
-                                                LiveDevelopment.setUrlWrapper(null);
-                                                ProjectManager.setBaseUrl("file:///opt/apps/FNRVOrlW6p/res/wgt/");
-                                                Inspector.setInspectorJson("Inspector.json");
+                                                ProjectManager.setBaseUrl("file:///opt/usr/apps/" + ProjectManager.getProjectId()
+                                                    + "/res/wgt/");
+                                                inspectorJson = "Inspector_old.json";
                                             }
+                                            Inspector.setInspectorJson(inspectorJson).done( function () {
+                                                if (Inspector.connected()) {
+                                                    LiveDevelopment.close();
+                                                    LiveDevelopment.open(Inspector.usingDevTool());
+                                                }
+                                            });
                                        
                                         })
                                     });
+            window.device = "Simulator";
+            ProjectManager.setBaseUrl("");
             child_process.exec('sdb devices',function(err, stdout, stderr) {
                 stdout.split("\n").forEach (function (device) {
                     var deviceInfo = device.split("\t");
                     if (deviceInfo.length === 3)
                         _deviceSelect.append($("<option value='" + deviceInfo[0] + "'>" + deviceInfo[2] + "</option>"));
+                    var projectId = ProjectManager.getProjectId(),
+                        deviceBaseDir = "/opt/usr/apps/" + projectId + "/res/wgt/";
+                    $(LiveDevelopment).on("liveHTMLSaved", function (event, doc) {
+                        execDeviceCommand("push " + doc.file.fullPath + " " + deviceBaseDir, function () {
+                            Inspector.Page.reload();
+                        });
+                });
                 })
             });
             _deviceSelect.insertBefore('#main-toolbar .buttons :first-child');
@@ -139,6 +152,14 @@ define(function main(require, exports, module) {
 
     function load() {
         _loadSelect();
+        $(ProjectManager).on("projectOpen", function (projectRoot) {
+            if (window.device !== "Simulator") {
+                var projectId = ProjectManager.getProjectId(),
+                    deviceBaseDir = "/opt/usr/apps/" + projectId + "/res/wgt/";
+                
+                ProjectManager.setBaseUrl("file://" + deviceBaseDir);
+            }
+        });
     }
 
     function unload() {

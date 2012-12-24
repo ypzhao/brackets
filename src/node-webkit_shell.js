@@ -1,7 +1,36 @@
 var gui = require('nw.gui');
 var child_process = require('child_process');
 var liveBrowser;
-$.extend(true, brackets.fs, require('fs'));
+var ports = {};
+var nodeFs = require('fs');
+$.extend(true, brackets.fs, nodeFs , {
+    stat: function (path, callback) {
+        if (path.indexOf("dropbox://") === 0) {
+
+        }
+        else  {
+            nodeFs.stat(path, function (err, stats) {
+                if (!err) {
+                    err = brackets.fs.NO_ERROR; 
+                }
+                if (err && err.ENOENT) {
+                    err = brackets.fs.NOT_FOUND_ERR;
+                }
+                callback(err, stats, new Date());
+            });
+        }
+    },
+    readdir: function (path, callback ) {
+        if (path.indexOf("dropbox://") === 0) {
+        }
+        else 
+            nodeFs.readdir(path, callback);
+    }
+});
+var execDeviceCommand = function (cmd, callback) {
+    console.log("cmd:" +  cmd);
+    child_process.exec("sdb -s " + window.device + " " + cmd, callback);
+};
 function ShowOpenDialog ( callback, allowMultipleSelection, chooseDirectories,
                 title, initialPath, fileTypes) {
     var file = $("<input type='file'/>");
@@ -87,25 +116,23 @@ function GetElapsedMilliseconds(){
 function OpenLiveBrowser(callback, url, enableRemoteDebugging){
     // enableRemoteDebugging flag is ignored on mac
     if (window.device && window.device !== "Simulator") {
-        var execDeviceCommand = function (cmd, callback) {
-            console.log("cmd:" +  cmd);
-            child_process.exec("sdb -s " + window.device + " " + cmd, callback);
-        };
-        var projectRoot = require("project/ProjectManager").getProjectRoot();
+        var ProjectManager = require("project/ProjectManager");
+        var projectRoot = ProjectManager.getProjectRoot();
         var projectName = projectRoot.name;
-        var projectId = "FNRVOrlW6p";
+        var projectId = ProjectManager.getProjectId();
         process.chdir(projectRoot.fullPath);
-        //if (brackets.fs.existsSync(projectName + ".wgt"))
-         //   brackets.fs.unlinkSync(projectName + ".wgt");
-        child_process.exec("ls", function (err, stdout, stderr) {
+        console.log("dir changed to " + projectRoot.fullPath);
+        if (brackets.fs.existsSync(projectName + ".wgt"))
+            brackets.fs.unlinkSync(projectName + ".wgt");
+        child_process.exec("web-packaging", function (err, stdout, stderr) {
             console.log(stdout);
             console.log(stderr);
-            execDeviceCommand("shell mdkir -p /opt/apps/widgets/test-widgets"); 
-            execDeviceCommand("push " + projectName + ".wgt /opt/apps/widgets/test-widgets", function(err, stdout, stderr) {
+            execDeviceCommand("shell mdkir -p /opt/apps/widgets/test-widgets", function () {
+            execDeviceCommand("push " + projectName + ".wgt /tmp/"+ projectName + ".wgt", function(err, stdout, stderr) {
                 console.log(stdout);
                 console.log(stderr);
                 //execDeviceCommand("shell '/usr/bin/wrt-launcher --developer-mode 1 && wrt-installer -iu /opt/apps/widgets/test-widgets/" + projectName + ".wgt && /usr/bin/wrt-launcher --start " + projectId + " --debug --timeout=90'", function (err, stdout, stderr) {
-                execDeviceCommand("shell '/usr/bin/wrt-launcher --developer-mode 1 && pkgcmd -s -n " + projectId + " -t wgt && pkgcmd -u -n " + projectId +  " -q -t wgt; pkgcmd -i -q -t wgt -p /opt/apps/widgets/test-widgets/" + projectName + ".wgt && /usr/bin/wrt-launcher --start " + projectId + " --debug --timeout=90'", function (err, stdout, stderr) {
+                execDeviceCommand("shell 'unzip -p /tmp/" + projectName + ".wgt > t && unzip -p /opt/usr/apps/widgets/test-widgets/" + projectName + ".wgt> t1 && if [ " + ports[window.device + "." + projectId] + " == undefined ] || ! diff t t1 >/dev/null  ; then cp /tmp/" + projectName + ".wgt" + " /opt/usr/apps/widgets/test-widgets && /usr/bin/wrt-launcher --developer-mode 1 && pkgcmd -s -n " + projectId + " -t wgt && pkgcmd -u -n " + projectId +  " -q -t wgt; pkgcmd -i -q -t wgt -p /opt/apps/widgets/test-widgets/" + projectName + ".wgt && /usr/bin/wrt-launcher --start " + projectId + " --debug --timeout=90 ; else echo port: " + ports[window.device + "." + projectId] + "; fi'", function (err, stdout, stderr) {
                     console.log("got stdout:" + stdout.split("\n").length);
                     stdout.split("\n").forEach (function (line) {
                         console.log("line:" + line);
@@ -113,6 +140,7 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
                             var port = line.split(" ")[1];
                             var Inspector = require("LiveDevelopment/Inspector/Inspector");
                             console.log("got port:" + port);
+                            ports[ window.device + "." + projectId ] = port;
                             Inspector.setSocketsGetter(function () {
                                 var result = new $.Deferred();
                                 console.log("setting up forward " + port);
@@ -120,7 +148,11 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
                                     console.log("getting debug url:" + port);
                                     $.getJSON("http://localhost:" + port + "/WidgetDebug", function (data) {
                                         console.log("got debug url:" + data.inspector_url);
-                                        result.resolve ([{webSocketDebuggerUrl:"ws://localhost:" + port +"/devtools/page/1", url:url}]);
+                                        result.resolve ([{
+                                            webSocketDebuggerUrl:"ws://localhost:" + port +"/devtools/page/1",
+                                            url:url,
+                                            devtoolsFrontendUrl: "/" + data.inspector_url
+                                        }]);
                                     });
                                 });
                                 return result;
@@ -131,6 +163,7 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
 
                 });
             });
+            });
         })
         return;
     }
@@ -138,28 +171,45 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
         var args = [];
         var newHeight = screen.availHeight/2;
         var nwWindow = gui.Window.get();
+        var simulatorPath, questionMarkIndex;
         if (enableRemoteDebugging) {
             args.push('--remote-debugging-port=9222');
             args.push('--no-toolbar');
         }
-        args.push("--url="+url);
-        liveBrowser = child_process.spawn(process.execPath, args);
-        liveBrowser.on('close', function () {
-            liveBrowser = null;
-        });
-        nwWindow.on('close', function() {
-            appshell.app.closeLiveBrowser();
-            nwWindow.close(true);
-        });
-        //Ubuntu 11.10 Unity env
-        if ((process.env["XDG_CURRENT_DESKTOP"] && process.env["XDG_CURRENT_DESKTOP"] === "Unity")
-            //Ubuntu 11.04 Unity env
-            || process.env["DESKTOP_SESSION"] === "gnome")
-            newHeight -= (window.outerHeight - window.innerHeight);
-        window.resizeTo(window.outerWidth, newHeight);
-        nwWindow.moveTo((screen.availWidth - window.outerWidth)/2,
-             screen.availTop + screen.availHeight/2);
-        callback(liveBrowser.pid > 0 ? 0: -1, liveBrowser.pid)
+        questionMarkIndex =  url.indexOf("?");
+        simulatorPath = url.substr(0, questionMarkIndex);
+        simulatorPath = simulatorPath.slice(7);
+        simulatorPath = simulatorPath.substr(0, simulatorPath.lastIndexOf("/"));
+        if (simulatorPath && brackets.platform === "win" && simulatorPath.charAt(0) === "/") {
+            simulatorPath = simulatorPath.slice(1);
+        }
+        var NativeFileSystem = require("file/NativeFileSystem").NativeFileSystem;
+        (new NativeFileSystem.DirectoryEntry(simulatorPath)).getFile(simulatorPath + "/package.json", {create: true}, function (fileEntry) {
+            var packageJson = {
+                name: "Brackets",
+                main: url
+            }
+            require("file/FileUtils").writeText(fileEntry, JSON.stringify(packageJson));
+            args.push(simulatorPath);
+            liveBrowser = child_process.spawn(process.execPath, args);
+            liveBrowser.on('close', function () {
+                liveBrowser = null;
+            });
+            nwWindow.on('close', function() {
+                appshell.app.closeLiveBrowser();
+                nwWindow.close(true);
+            });
+            //Ubuntu 11.10 Unity env
+            if ((process.env["XDG_CURRENT_DESKTOP"] && process.env["XDG_CURRENT_DESKTOP"] === "Unity")
+                //Ubuntu 11.04 Unity env
+                || process.env["DESKTOP_SESSION"] === "gnome")
+                newHeight -= (window.outerHeight - window.innerHeight);
+            window.resizeTo(window.outerWidth, newHeight);
+            nwWindow.moveTo((screen.availWidth - window.outerWidth)/2,
+                 screen.availTop + screen.availHeight/2);
+            callback(liveBrowser.pid > 0 ? 0: -1, liveBrowser.pid)
+        })
+
     }, 0);
 }
 function CloseLiveBrowser(callback){

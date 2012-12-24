@@ -49,7 +49,10 @@ define(function ConsoleAgent(require, exports, module) {
             var callFrame = message.stackTrace[0];
             text += " in " + callFrame.functionName + ":" + callFrame.columnNumber;
         }
-        console[level](text);
+        if (console[level])
+            console[level](text);
+        else
+            console.log(level + ":" + text);
     }
 
     // WebInspector Event: Console.messageAdded

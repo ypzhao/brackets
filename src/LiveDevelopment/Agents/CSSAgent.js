@@ -86,7 +86,7 @@ define(function CSSAgent(require, exports, module) {
     function reloadCSSForDocument(doc) {
         var style = styleForURL(doc.url);
         console.assert(style, "Style Sheet for document not loaded: " + doc.url);
-        Inspector.CSS.setStyleSheetText(style.styleSheetId, doc.getText());
+        Inspector.CSS.setStyleSheetText(style.styleSheetId, doc.getText(true));
     }
 
     /** Empties a CSS style sheet given a document that has been deleted

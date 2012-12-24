@@ -93,6 +93,7 @@ define(function Inspector(require, exports, module) {
     var _devToolIframe;
     var _editingElements;
     var _socketsGetter;
+    var _usingDevTool;
 
 
     /** Check a parameter value against the given signature
@@ -265,7 +266,12 @@ define(function Inspector(require, exports, module) {
     function disconnect() {
         if (_socket) {
             if (_socket.readyState === 1) {
+                //Tizen webruntime will send an error message when closing, we need to ignore it
+                // and trigger the onclose manually
+                _socket.onmessage = null;
+                _socket.onclose = null;
                 _socket.close();
+                _onDisconnect();
             } else {
                 delete _socket.onmessage;
                 delete _socket.onopen;
@@ -284,6 +290,7 @@ define(function Inspector(require, exports, module) {
      */
     function connect(socketURL, useDevTool, devtoolsFrontendUrl) {
         disconnect();
+        _usingDevTool = useDevTool;
         if (useDevTool) {
             var toolbar = $('#main-toolbar'),
                 toolbarHeight = toolbar.outerHeight();
@@ -375,22 +382,28 @@ define(function Inspector(require, exports, module) {
     function connected() {
         return _socket !== undefined || (_devToolIframe && _devToolIframe.parent()[0])
     }
+    function usingDevTool() {
+        return _usingDevTool ? true : false;
+    }
     function setInspectorJson(fileName) {
         var request = new XMLHttpRequest();
+        var result = new $.Deferred()
         request.open("GET", "LiveDevelopment/Inspector/" + fileName);
         request.onload = function onLoad() {
-            var InspectorJSON = JSON.parse(request.response);
+            var inspectorJSON = JSON.parse(request.response);
             var i, j, domain, domainDef, command;
-            for (i in InspectorJSON.domains) {
-                domain = InspectorJSON.domains[i];
+            for (i in inspectorJSON.domains) {
+                domain = inspectorJSON.domains[i];
                 exports[domain.domain] = {};
                 for (j in domain.commands) {
                     command = domain.commands[j];
                     exports[domain.domain][command.name] = _send.bind(undefined, domain.domain + "." + command.name, command.parameters);
                 }
             }
+            result.resolve();
         };
         request.send(null);
+        return result;
     }
 
     /** Initialize the Inspector
@@ -400,7 +413,7 @@ define(function Inspector(require, exports, module) {
     function init(theConfig) {
         exports.config = theConfig;
         $(window).resize(_setDevToolHeight);
-        setInspectorJson("Inspector_new.json");
+        setInspectorJson("Inspector.json");
         setInterval(function () {
             var toolbar = $('#main-toolbar');
             toolbar.offset({top: 0, left: toolbar.offset().left});
@@ -418,5 +431,6 @@ define(function Inspector(require, exports, module) {
     exports.setSocketsGetter = setSocketsGetter;
     exports.setInspectorJson = setInspectorJson;
     exports.connected = connected;
+    exports.usingDevTool = usingDevTool;
     exports.init = init;
 });

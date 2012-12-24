@@ -41,7 +41,6 @@ define(function main(require, exports, module) {
 
     var _styleTag;
     var _button;
-    var _debugging = false;
     function _onFrameNavigated(event, res) {
         var elementsPanel,
             inspector,
@@ -85,24 +84,19 @@ define(function main(require, exports, module) {
                 .attr({ href: "#", id: "denniskehrig-v8live-button" })
                 .insertBefore('#main-toolbar .buttons #toolbar-go-live')
                 .click(function () {
-                    if (Inspector.connected()) {
-                        LiveDevelopment.close();
-                        _debugging = false;
-                    }
-                    else {
-                        _debugging = true;
-                        CommandManager.execute
-                            (Commands.FILE_LIVE_FILE_PREVIEW, true);
+                    var connected =  Inspector.connected();
+                    LiveDevelopment.close();
+                    if (connected && !Inspector.usingDevTool() || !connected) {
+                        LiveDevelopment.open(true);
                     }
                 })
         });
         $(Inspector.Page).on("frameNavigated.dev-tools", _onFrameNavigated)
         $(Inspector).on("connect", function () {
-            _button.toggleClass("bridged", _debugging);
+            _button.toggleClass("bridged", Inspector.usingDevTool());
         });
         $(Inspector).on("disconnect", function () {
-            _debugging = false;
-            _button.toggleClass("bridged", _debugging);
+            _button.toggleClass("bridged", false);
         });
     }
 
