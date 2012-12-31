@@ -108,16 +108,19 @@ define(function main(require, exports, module) {
                                     .change(function() {
                                         $("option:selected", this).each(function () {
                                             var inspectorJson = "Inspector.json";
+                                            var realDeviceUrlMapper = function (url) {
+                                                    var encodedDocPath = encodeURI(url);
+                                                    var encodedProjectPath = encodeURI(ProjectManager.getProjectRoot().fullPath);
+                                                    return url.replace(new RegExp("file:/{2,3}" + encodedProjectPath), "file:///opt/usr/apps/" + ProjectManager.getProjectId() + "/res/wgt/");
+                                                };
                                             window.device = $(this).val();
                                             Inspector.setSocketsGetter(null);
-                                            if (window.device === "Simulator") {
-                                                ProjectManager.setBaseUrl("");
-                                            }
-                                            else {
-                                                ProjectManager.setBaseUrl("file:///opt/usr/apps/" + ProjectManager.getProjectId()
-                                                    + "/res/wgt/");
+                                            if (window.device !== "Simulator") {
+                                                LiveDevelopment.addUrlMapper(realDeviceUrlMapper);
                                                 inspectorJson = "Inspector_old.json";
                                             }
+                                            else 
+                                                LiveDevelopment.removeUrlMapper(realDeviceUrlMapper);
                                             Inspector.setInspectorJson(inspectorJson).done( function () {
                                                 if (Inspector.connected()) {
                                                     LiveDevelopment.close();

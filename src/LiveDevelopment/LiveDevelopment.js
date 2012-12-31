@@ -117,10 +117,17 @@ define(function LiveDevelopment(require, exports, module) {
     var _relatedDocuments; // CSS and JS documents that are used by the live HTML document
 
     var _urlWrappers = [];
+    var _urlMappers = [];
     var _closeScript;
     var _useDevTool;
     function addUrlWrapper(wrapper) {
         _urlWrappers.push(wrapper);
+    }
+    function addUrlMapper(mapper) {
+        _urlMappers.push(mapper);
+    }
+    function removeUrlMapper(mapper) {
+        _urlMappers.splice(_urlMappers.indexOf(mapper), 1);
     }
     function setCloseScript(script) {
         _closeScript = script;
@@ -174,6 +181,10 @@ define(function LiveDevelopment(require, exports, module) {
     
             url = encodeURI(prefix + path);
         }
+        _urlMappers.forEach(function (mapper) {
+            url = mapper(url);
+        })
+
 
         return url;
     }
@@ -676,7 +687,6 @@ define(function LiveDevelopment(require, exports, module) {
 
         if (Inspector.connected()) {
             hideHighlight();
-            //if (agents.network && agents.network.wasURLRequested(_pathToUrl(doc.file.fullPath))) {
             if (agents.network && agents.network.wasURLRequested(doc.url)) {
                 _closeDocument();
                 var editor = EditorManager.getCurrentFullEditor();
@@ -743,6 +753,8 @@ define(function LiveDevelopment(require, exports, module) {
     exports.hideHighlight       = hideHighlight;
     exports.redrawHighlight     = redrawHighlight;
     exports.addUrlWrapper       = addUrlWrapper;
+    exports.addUrlMapper        = addUrlMapper;
+    exports.removeUrlMapper     = removeUrlMapper;
     exports.setCloseScript       = setCloseScript;
     exports.init                = init;
 });

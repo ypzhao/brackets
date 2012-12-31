@@ -3,28 +3,101 @@ var child_process = require('child_process');
 var liveBrowser;
 var ports = {};
 var nodeFs = require('fs');
+var os = require('os');
+function getDropbox(callback) {
+    if (!window.dropbox) {
+        require(["extensions/default/dropbox/dropbox"], function () {
+            var dropboxOAuthDriver = $.extend({}, new Dropbox.Drivers.Redirect ({rememberUser: true}), {
+                //url: function() { return ""; },
+                url: function() { return "";},
+                doAuthorize: function(authUrl, token, tokenSecret, callback) {
+                    var w = window.open(authUrl);
+                    // Hack to find out when the dropbox authorization window was closed
+                    // (check every 500ms to see if it's still there)
+                    var timer =  setInterval(function() {
+                        if (w.closed) {
+                            clearInterval(timer);
+                            callback(token);
+                        }
+                    }, 500);
+                }
+            });
+
+            window.dropbox = new Dropbox.Client({
+                key: "xbfa6vr2n1nk082", secret: "dze5e13g0j4vf07", sandbox: true
+            });
+
+            //dropbox.authDriver(new Dropbox.Drivers.Redirect({ rememberUser: true}));
+            dropbox.authDriver(dropboxOAuthDriver);
+            dropbox.authenticate(this);
+        }.bind(callback));
+    }
+    else
+        callback(null, dropbox);
+}
+function dropboxHandler(path, callback) {
+    if (path.indexOf("dropbox://") === 0) {
+        getDropbox(function (err, dropbox) {
+            callback(path.replace("dropbox://", ""), dropbox);
+        });
+        return true;
+    }
+    return false;
+}
 $.extend(true, brackets.fs, nodeFs , {
     stat: function (path, callback) {
-        if (path.indexOf("dropbox://") === 0) {
-
-        }
-        else  {
+        if (!dropboxHandler(path, function (path, dropbox) {
+            dropbox.stat(path, function(err, stats) {
+                if (!err) {
+                    err = brackets.fs.NO_ERROR; 
+                    stats.isDirectory =  function () {
+                        return this.isFolder;
+                    }.bind(stats)
+                    stats.isFile =  function () {
+                        return this.isFile;
+                    }.bind($.extend({}, stats))
+                    stats.mtime = stats.modifiedAt;
+                }
+                if (err && err.status === 404) {
+                    err = brackets.fs.ERR_NOT_FOUND;
+                }
+                this(err, stats);
+            }.bind(callback));
+        })) {
             nodeFs.stat(path, function (err, stats) {
                 if (!err) {
                     err = brackets.fs.NO_ERROR; 
+                    stats.mtime = new Date();
                 }
-                if (err && err.ENOENT) {
-                    err = brackets.fs.NOT_FOUND_ERR;
+                if (err && err.code === "ENOENT") {
+                    err = brackets.fs.ERR_NOT_FOUND;
                 }
-                callback(err, stats, new Date());
-            });
+                this(err, stats);
+            }.bind(callback));
         }
     },
     readdir: function (path, callback ) {
-        if (path.indexOf("dropbox://") === 0) {
-        }
-        else 
+        if (!dropboxHandler(path, function (path, dropbox) {
+            dropbox.readdir(path.replace("dropbox://", ""), function(error, fileNames, folder, files) {
+                this(error, fileNames);
+            }.bind(callback));
+        }))
             nodeFs.readdir(path, callback);
+    },
+    makedir: function (path, permissions, callback ) {
+        nodeFs.mkdir(path, callback);
+    },
+    readFile: function (path, encoding, callback ) {
+        if (!dropboxHandler(path, function (path, dropbox) {
+            dropbox.readFile(path, {binary:true}, callback);
+        }))
+            nodeFs.readFile(path, encoding, callback);
+    },
+    writeFile: function (path, data, encoding, callback ) {
+        if (!dropboxHandler(path, function (path, dropbox) {
+            dropbox.writeFile(path, data, {binary:true}, callback);
+        }))
+            nodeFs.writeFile(path, data, encoding, callback);
     }
 });
 var execDeviceCommand = function (cmd, callback) {
@@ -120,8 +193,12 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
         var projectRoot = ProjectManager.getProjectRoot();
         var projectName = projectRoot.name;
         var projectId = ProjectManager.getProjectId();
-        process.chdir(projectRoot.fullPath);
-        console.log("dir changed to " + projectRoot.fullPath);
+            console.log(projectRoot.fullPath.substr(10));
+        if (projectRoot.fullPath.indexOf("dropbox://") === 0) {
+            process.chdir(os.tmpDir() + projectRoot.fullPath.substr(10));
+        }
+        else
+            process.chdir(projectRoot.fullPath);
         if (brackets.fs.existsSync(projectName + ".wgt"))
             brackets.fs.unlinkSync(projectName + ".wgt");
         child_process.exec("web-packaging", function (err, stdout, stderr) {
@@ -189,9 +266,10 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
                 name: "Brackets",
                 main: url
             }
-            require("file/FileUtils").writeText(fileEntry, JSON.stringify(packageJson));
-            args.push(simulatorPath);
-            liveBrowser = child_process.spawn(process.execPath, args);
+            require("file/FileUtils").writeText(fileEntry, JSON.stringify(packageJson)).done( function () {
+            args.push('--allow-file-access-from-files');
+            args.push(".");
+            liveBrowser = child_process.spawn(process.execPath,  args, {cwd: simulatorPath});
             liveBrowser.on('close', function () {
                 liveBrowser = null;
             });
@@ -208,6 +286,7 @@ function OpenLiveBrowser(callback, url, enableRemoteDebugging){
             nwWindow.moveTo((screen.availWidth - window.outerWidth)/2,
                  screen.availTop + screen.availHeight/2);
             callback(liveBrowser.pid > 0 ? 0: -1, liveBrowser.pid)
+            });
         })
 
     }, 0);
